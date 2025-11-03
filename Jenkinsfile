@@ -2,7 +2,6 @@ pipeline {
     agent any
 
     environment {
-        // Docker Hub credentials stored in Jenkins
         DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials')
         DOCKER_IMAGE = "${DOCKERHUB_CREDENTIALS_USR}/myapp-bluegreen"
     }
@@ -10,7 +9,6 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                // Replace with your actual GitHub public repo URL
                 git branch: 'main', url: 'https://github.com/MUTHU-SANJAI/myapp-bluegreen.git'
             }
         }
@@ -18,7 +16,6 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    // Build Docker image with build number as tag
                     dockerImage = docker.build("${DOCKER_IMAGE}:${BUILD_NUMBER}")
                 }
             }
@@ -27,7 +24,6 @@ pipeline {
         stage('Push to Docker Hub') {
             steps {
                 script {
-                    // Push Docker image to Docker Hub
                     docker.withRegistry('', 'dockerhub-credentials') {
                         dockerImage.push("${BUILD_NUMBER}")
                         dockerImage.push("latest")
@@ -39,7 +35,7 @@ pipeline {
         stage('Blue-Green Deploy') {
             steps {
                 script {
-                    // Detect currently active container (blue or green)
+                    // Detect active container (blue or green)
                     def activeContainer = bat(
                         script: '''
                             @echo off
@@ -58,26 +54,25 @@ pipeline {
                     def newEnv = activeContainer.contains('blue') ? 'green' : 'blue'
                     echo "Deploying new version to ${newEnv} environment..."
 
-                    // Determine port based on environment
-                    def port = newEnv == 'blue' ? '8080:8080' : '8081:8080'
+                    // Use safe host ports to avoid conflicts
+                    def port = newEnv == 'blue' ? '8090:8080' : '8091:8080'
 
-                    // Run new container in the inactive environment
+                    // Run new container
                     bat """
                         docker run -d --name myapp-${newEnv} -p ${port} -e ENVIRONMENT=${newEnv} ${DOCKER_IMAGE}:${BUILD_NUMBER}
                     """
 
-                    // Wait a few seconds for the container to start
+                    // Wait for container to start
                     sleep 5
 
-                    // Health check on the new container
+                    // Health check
                     def healthCheck = bat(
-                        script: "curl -s http://localhost:${newEnv == 'blue' ? '8080' : '8081'}",
+                        script: "curl -s http://localhost:${newEnv == 'blue' ? '8090' : '8091'}",
                         returnStatus: true
                     )
 
                     if (healthCheck == 0) {
                         echo "✅ ${newEnv} environment healthy. Switching traffic..."
-                        // Stop old container after new one is healthy
                         if (activeContainer) {
                             bat "docker stop ${activeContainer} && docker rm ${activeContainer}"
                         }

@@ -39,25 +39,27 @@ pipeline {
         stage('Blue-Green Deploy') {
             steps {
                 script {
-                    // Check active container (blue or green)
+                    // Detect currently active container (blue or green)
                     def activeContainer = bat(
-                        script: 'for /f "delims=" %%i in (\'docker ps --filter "name=myapp-" --format "{{.Names}}" ^| findstr /r /c:".*" \') do @echo %%i',
+                        script: '@echo off & for /f "tokens=1" %%i in (\'docker ps --filter "name=myapp-" ^| findstr "myapp-" ^| findstr /v "CONTAINER"\') do @echo %%i & goto done & :done',
                         returnStdout: true
                     ).trim()
 
                     def newEnv = activeContainer.contains('blue') ? 'green' : 'blue'
                     echo "Deploying new version to ${newEnv} environment..."
 
-                    // Run new container in inactive environment
+                    // Determine port based on environment
                     def port = newEnv == 'blue' ? '8080:8080' : '8081:8080'
+
+                    // Run new container in the inactive environment
                     bat """
                         docker run -d --name myapp-${newEnv} -p ${port} -e ENVIRONMENT=${newEnv} ${DOCKER_IMAGE}:${BUILD_NUMBER}
                     """
 
-                    // Wait 5 seconds for container to start
+                    // Wait a few seconds for the container to start
                     sleep 5
 
-                    // Health check on new container
+                    // Health check on the new container
                     def healthCheck = bat(
                         script: "curl -s http://localhost:${newEnv == 'blue' ? '8080' : '8081'}",
                         returnStatus: true
@@ -65,7 +67,7 @@ pipeline {
 
                     if (healthCheck == 0) {
                         echo "✅ ${newEnv} environment healthy. Switching traffic..."
-                        // Stop old container
+                        // Stop old container after new one is healthy
                         if (activeContainer) {
                             bat "docker stop ${activeContainer} && docker rm ${activeContainer}"
                         }

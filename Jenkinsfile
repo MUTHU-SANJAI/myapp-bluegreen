@@ -35,7 +35,7 @@ pipeline {
         stage('Blue-Green Deploy') {
             steps {
                 script {
-                    // Detect currently active container (blue or green)
+                    // Detect currently active container
                     def activeContainer = bat(
                         script: '''
                             @echo off
@@ -51,23 +51,27 @@ pipeline {
                         returnStdout: true
                     ).trim()
 
+                    // Determine new environment
                     def newEnv = activeContainer.contains('blue') ? 'green' : 'blue'
                     echo "Deploying new version to ${newEnv} environment..."
 
                     def containerName = "myapp-${newEnv}"
                     def hostPort = newEnv == 'blue' ? '8090' : '8091'
 
-                    // Remove any old container with same name
-                    bat """
-                        docker rm -f ${containerName} 2>nul || echo No existing container to remove
-                    """
+                    // Stop and remove old container safely
+                    if (activeContainer) {
+                        bat """
+                            docker stop ${activeContainer} 2>nul || echo Container not running
+                            docker rm ${activeContainer} 2>nul || echo Container already removed
+                        """
+                    }
 
                     // Run new container
                     bat """
                         docker run -d --name ${containerName} -p ${hostPort}:8080 -e ENVIRONMENT=${newEnv} ${DOCKER_IMAGE}:${BUILD_NUMBER}
                     """
 
-                    // Wait for the container to fully start
+                    // Wait for container to start
                     echo "Waiting 15 seconds for container to start..."
                     sleep 15
 
@@ -78,11 +82,7 @@ pipeline {
                     ).trim()
 
                     if (healthCheck.contains("Up")) {
-                        echo "✅ ${newEnv} container is running. Switching traffic..."
-                        // Stop and remove old active container
-                        if (activeContainer) {
-                            bat "docker stop ${activeContainer} && docker rm ${activeContainer}"
-                        }
+                        echo "✅ ${newEnv} container is running. Deployment successful!"
                     } else {
                         error("❌ New deployment failed to start.")
                     }

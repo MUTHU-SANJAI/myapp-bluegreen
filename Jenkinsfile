@@ -97,11 +97,25 @@ pipeline {
             }
         }
 
+        // --- Modified Health Check ---
         stage('Health Check') {
             steps {
                 script {
-                    def port = '8082'
-                    def containerName = 'myapp-green'
+                    // Determine which container and port was deployed in previous stage
+                    def activeContainer = bat(
+                        script: 'docker ps --filter "name=myapp-" --format "{{.Names}}"',
+                        returnStdout: true
+                    ).trim()
+                    
+                    def containerName = ''
+                    def port = ''
+                    if (activeContainer.contains('myapp-blue')) {
+                        containerName = 'myapp-blue'
+                        port = PORT_BLUE
+                    } else {
+                        containerName = 'myapp-green'
+                        port = PORT_GREEN
+                    }
 
                     echo "Checking ${containerName} on port ${port}..."
 
@@ -111,14 +125,12 @@ pipeline {
                     for (int i = 1; i <= maxRetries; i++) {
                         echo "Attempt ${i}..."
 
-                        def rawOutput = bat(
-                            script: """
-                                for /f %%i in ('curl -s -o NUL -w "%%{http_code}" http://localhost:${port}') do @echo %%i
-                            """,
+                        // Use curl to get only the HTTP status code
+                        def status = bat(
+                            script: "curl -s -o NUL -w %%{http_code} http://localhost:${port}",
                             returnStdout: true
                         ).trim()
 
-                        def status = rawOutput.replaceAll(/[^0-9]/, "")
                         echo "HTTP status: ${status}"
 
                         if (status == '200') {
@@ -137,6 +149,7 @@ pipeline {
                 }
             }
         }
+
     }
 
     post {

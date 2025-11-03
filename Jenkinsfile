@@ -3,12 +3,14 @@ pipeline {
 
     environment {
         IMAGE_NAME = 'muthusanjai/myapp-bluegreen'
-        LOCAL_IMAGE_TAG = 'local'
+        IMAGE_TAG  = 'latest'  // Change if you want versioned tags
     }
 
     stages {
+
         stage('Checkout') {
             steps {
+                echo "Cloning repository..."
                 git branch: 'main',
                     url: 'https://github.com/MUTHU-SANJAI/myapp-bluegreen.git'
             }
@@ -16,7 +18,8 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                bat "docker build -t %IMAGE_NAME%:%LOCAL_IMAGE_TAG% ."
+                echo "Building Docker image..."
+                bat "docker build -t %IMAGE_NAME%:%IMAGE_TAG% ."
             }
         }
 
@@ -46,10 +49,10 @@ pipeline {
                     // --- Determine inactive environment to deploy ---
                     def activeEnv = bat(script: 'docker ps -q -f "name=myapp-blue"', returnStdout: true).trim() ? "green" : "blue"
                     def port = activeEnv == "blue" ? 8090 : 8091
-                    echo "Deploying new version to ${activeEnv} environment on port ${port}"
+                    echo "Deploying new version to ${activeEnv} environment on port ${port}..."
 
                     // --- Run new container ---
-                    bat "docker run -d --name myapp-${activeEnv} -p ${port}:8080 -e ENVIRONMENT=${activeEnv} %IMAGE_NAME%:%LOCAL_IMAGE_TAG%"
+                    bat "docker run -d --name myapp-${activeEnv} -p ${port}:8080 -e ENVIRONMENT=${activeEnv} %IMAGE_NAME%:%IMAGE_TAG%"
 
                     // --- Wait a few seconds for the container to start ---
                     sleep(time:5, unit:"SECONDS")
@@ -70,7 +73,7 @@ pipeline {
 
     post {
         failure {
-            echo "Deployment failed. Check the console logs for details."
+            echo "Deployment failed. Check console logs for errors."
         }
         success {
             echo "Deployment pipeline completed successfully!"

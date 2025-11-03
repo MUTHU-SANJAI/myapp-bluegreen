@@ -1,14 +1,12 @@
-pipeline { 
+pipeline {
     agent any
 
     environment {
-        DOCKER_USER = 'muthusanjai'
-        DOCKER_IMAGE = 'muthusanjai/myapp-bluegreen:latest'
+        DOCKER_IMAGE = "muthusanjai/myapp-bluegreen:latest"
     }
 
     stages {
-
-        stage('Checkout SCM') {
+        stage('Checkout') {
             steps {
                 echo "Checking out code from GitHub..."
                 checkout scm
@@ -19,7 +17,7 @@ pipeline {
             steps {
                 echo "Logging in to Docker Hub..."
                 bat """
-                echo sNCByxHR\$Tw9eb! | docker login --username %DOCKER_USER% --password-stdin
+                    echo YOUR_DOCKER_PASSWORD | docker login --username YOUR_DOCKER_USERNAME --password-stdin
                 """
             }
         }
@@ -41,42 +39,42 @@ pipeline {
         stage('Blue-Green Deployment') {
             steps {
                 script {
-                    echo "Checking which container is active..."
-                    
-                    // Get active container (myapp-green or myapp-blue)
+                    echo "Detecting active container..."
                     def active = bat(script: 'docker ps --filter "name=myapp-green" --filter "status=running" --format "{{.Names}}"', returnStdout: true).trim()
                     echo "Active container: ${active}"
 
-                    // Decide inactive container and port
+                    // Determine inactive container and port
                     def inactive = active == 'myapp-green' ? 'myapp-blue' : 'myapp-green'
-                    def port = active == 'myapp-green' ? '8081' : '8080'  // alternate port
+                    def port = active == 'myapp-green' ? '8082' : '8081'  // alternate ports
 
                     echo "Deploying new version to inactive container: ${inactive} on port ${port}"
 
-                    // Remove old inactive container if exists
+                    // Remove old inactive container if it exists
                     bat "docker rm -f ${inactive} || echo No existing container"
 
                     // Run new container on alternate port
                     bat "docker run -d --name ${inactive} -p ${port}:8080 %DOCKER_IMAGE%"
-                    
-                    echo "Deployment of ${inactive} completed. Access via port ${port}"
+
+                    echo "Deployment completed. Access new version on port ${port}"
                 }
             }
         }
 
         stage('Health Check') {
             steps {
-                echo "Health check can be implemented here if needed."
+                script {
+                    echo "Skipping health check for now (add your own check if needed)."
+                }
             }
         }
     }
 
     post {
+        success {
+            echo "Pipeline finished successfully!"
+        }
         failure {
             echo "Pipeline failed. Check logs for details."
-        }
-        success {
-            echo "Pipeline completed successfully."
         }
     }
 }

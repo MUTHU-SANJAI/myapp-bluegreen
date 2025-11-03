@@ -23,34 +23,36 @@ pipeline {
         stage('Blue-Green Deployment') {
             steps {
                 script {
-                    // Check if Blue container exists
+                    // --- Stop and remove old containers if they exist ---
                     def blueExists = bat(script: 'docker ps -aq -f "name=myapp-blue"', returnStdout: true).trim()
                     if (blueExists) {
+                        echo "Stopping and removing old Blue container..."
                         bat "docker stop myapp-blue"
                         bat "docker rm myapp-blue"
                     }
 
-                    // Check if Green container exists
                     def greenExists = bat(script: 'docker ps -aq -f "name=myapp-green"', returnStdout: true).trim()
                     if (greenExists) {
+                        echo "Stopping and removing old Green container..."
                         bat "docker stop myapp-green"
                         bat "docker rm myapp-green"
                     }
 
-                    // Decide which environment to deploy
+                    // --- Decide which environment to deploy ---
                     def activeEnv = bat(script: 'docker ps -q -f "name=myapp-blue"', returnStdout: true).trim() ? "green" : "blue"
                     def port = activeEnv == "blue" ? 8090 : 8091
-
                     echo "Deploying new version to ${activeEnv} environment on port ${port}"
 
-                    // Run the container
+                    // --- Run new container ---
                     bat "docker run -d --name myapp-${activeEnv} -p ${port}:8080 -e ENVIRONMENT=${activeEnv} %IMAGE_NAME%:%LOCAL_IMAGE_TAG%"
 
-                    // Wait a few seconds for app to start
+                    // --- Wait for container to start ---
                     sleep(time:5, unit:"SECONDS")
 
-                    // Health check
-                    def response = bat(script: "powershell -Command \"Invoke-WebRequest http://localhost:${port}/health -UseBasicParsing | Select-Object -ExpandProperty Content\"", returnStdout: true).trim()
+                    // --- Health check using curl ---
+                    def response = bat(script: "curl -s http://localhost:${port}/health", returnStdout: true).trim()
+                    echo "Health check response: ${response}"
+
                     if (!response.contains('"status":"ok"')) {
                         error("New deployment failed health check.")
                     } else {
@@ -58,6 +60,15 @@ pipeline {
                     }
                 }
             }
+        }
+    }
+
+    post {
+        failure {
+            echo "Deployment failed. Check the console logs for details."
+        }
+        success {
+            echo "Deployment pipeline completed successfully!"
         }
     }
 }

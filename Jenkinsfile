@@ -96,43 +96,44 @@ pipeline {
             }
         }
 
-        stage('Health Check') {
-            steps {
-                script {
-                    def port = '8082'
-                    def containerName = 'myapp-green'
+       stage('Health Check') {
+    steps {
+        script {
+            def port = '8082'
+            def containerName = 'myapp-green'
 
-                    echo "Checking ${containerName} on port ${port}..."
+            echo "Checking ${containerName} on port ${port}..."
 
-                    def maxRetries = 5
-                    def success = false
+            def maxRetries = 5
+            def success = false
 
-                    for (int i = 1; i <= maxRetries; i++) {
-                        echo "Attempt ${i}..."
-                        def status = bat(
-                            script: "curl -s -o NUL -w %%{http_code} http://localhost:${port}",
-                            returnStdout: true
-                        ).trim()
+            for (int i = 1; i <= maxRetries; i++) {
+                echo "Attempt ${i}..."
+                def rawOutput = bat(
+                    script: "curl -s -o NUL -w %%{http_code} http://localhost:${port}",
+                    returnStdout: true
+                ).trim()
 
-                        echo "HTTP status: ${status}"
+                // Extract only the digits from the output (e.g., 200)
+                def status = rawOutput.replaceAll(/[^0-9]/, "")
+                echo "HTTP status: ${status}"
 
-                        if (status == '200') {
-                            echo "${containerName} is healthy!"
-                            success = true
-                            break
-                        } else {
-                            echo "Not ready yet, retrying in 5s..."
-                            sleep 5
-                        }
-                    }
-
-                    if (!success) {
-                        error "${containerName} failed health check!"
-                    }
+                if (status == '200') {
+                    echo "${containerName} is healthy!"
+                    success = true
+                    break
+                } else {
+                    echo "Not ready yet, retrying in 5s..."
+                    sleep 5
                 }
+            }
+
+            if (!success) {
+                error "${containerName} failed health check!"
             }
         }
     }
+}
 
     post {
         always {

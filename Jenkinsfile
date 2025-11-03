@@ -26,25 +26,21 @@ pipeline {
         stage('Blue-Green Deployment') {
             steps {
                 script {
-                    // --- Stop & remove Blue container if it exists ---
-                    def blueExists = bat(script: 'docker ps -aq -f "name=myapp-blue"', returnStdout: true).trim()
-                    if (blueExists) {
-                        echo "Stopping and removing old Blue container..."
-                        bat "docker stop myapp-blue"
-                        bat "docker rm myapp-blue"
-                    } else {
-                        echo "No Blue container to remove."
-                    }
+                    // --- Stop & remove Blue container safely ---
+                    bat """
+                    for /f "tokens=*" %%i in ('docker ps -aq -f "name=myapp-blue"') do (
+                        docker stop %%i || exit /b 0
+                        docker rm %%i || exit /b 0
+                    )
+                    """
 
-                    // --- Stop & remove Green container if it exists ---
-                    def greenExists = bat(script: 'docker ps -aq -f "name=myapp-green"', returnStdout: true).trim()
-                    if (greenExists) {
-                        echo "Stopping and removing old Green container..."
-                        bat "docker stop myapp-green"
-                        bat "docker rm myapp-green"
-                    } else {
-                        echo "No Green container to remove."
-                    }
+                    // --- Stop & remove Green container safely ---
+                    bat """
+                    for /f "tokens=*" %%i in ('docker ps -aq -f "name=myapp-green"') do (
+                        docker stop %%i || exit /b 0
+                        docker rm %%i || exit /b 0
+                    )
+                    """
 
                     // --- Determine inactive environment ---
                     def activeEnv = bat(script: 'docker ps -q -f "name=myapp-blue"', returnStdout: true).trim() ? "green" : "blue"

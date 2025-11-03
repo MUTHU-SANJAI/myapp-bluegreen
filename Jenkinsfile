@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        // Docker Hub credentials ID added in Jenkins
+        // Docker Hub credentials stored in Jenkins
         DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials')
         DOCKER_IMAGE = "${DOCKERHUB_CREDENTIALS_USR}/myapp-bluegreen"
     }
@@ -10,7 +10,7 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                // Replace with your actual GitHub username and public repo URL
+                // Replace with your actual GitHub public repo URL
                 git branch: 'main', url: 'https://github.com/MUTHU-SANJAI/myapp-bluegreen.git'
             }
         }
@@ -18,7 +18,7 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    // Build a Docker image with the build number as a tag
+                    // Build Docker image with build number as tag
                     dockerImage = docker.build("${DOCKER_IMAGE}:${BUILD_NUMBER}")
                 }
             }
@@ -36,37 +36,46 @@ pipeline {
             }
         }
 
-       stage('Blue-Green Deploy') {
-    steps {
-        script {
-            // Check active environment
-            def activeContainer = bat(script: "docker ps --filter \"name=myapp-\" --format \"{{.Names}}\" | head -n 1", returnStdout: true).trim()
-            def newEnv = activeContainer.contains('blue') ? 'green' : 'blue'
+        stage('Blue-Green Deploy') {
+            steps {
+                script {
+                    // Check active container (blue or green)
+                    def activeContainer = bat(
+                        script: 'for /f "delims=" %%i in (\'docker ps --filter "name=myapp-" --format "{{.Names}}" ^| findstr /r /c:".*" \') do @echo %%i',
+                        returnStdout: true
+                    ).trim()
 
-            echo "Deploying new version to ${newEnv} environment..."
+                    def newEnv = activeContainer.contains('blue') ? 'green' : 'blue'
+                    echo "Deploying new version to ${newEnv} environment..."
 
-            // Run new container
-            bat """
-                docker run -d --name myapp-${newEnv} -p ${newEnv == 'blue' ? '8080:8080' : '8081:8080'} -e ENVIRONMENT=${newEnv} ${DOCKER_IMAGE}:${BUILD_NUMBER}
-            """
+                    // Run new container in inactive environment
+                    def port = newEnv == 'blue' ? '8080:8080' : '8081:8080'
+                    bat """
+                        docker run -d --name myapp-${newEnv} -p ${port} -e ENVIRONMENT=${newEnv} ${DOCKER_IMAGE}:${BUILD_NUMBER}
+                    """
 
-            // Wait and health check
-            sleep 5
+                    // Wait 5 seconds for container to start
+                    sleep 5
 
-            def healthCheck = bat(script: "curl -s http://localhost:${newEnv == 'blue' ? '8080' : '8081'}", returnStatus: true)
+                    // Health check on new container
+                    def healthCheck = bat(
+                        script: "curl -s http://localhost:${newEnv == 'blue' ? '8080' : '8081'}",
+                        returnStatus: true
+                    )
 
-            if (healthCheck == 0) {
-                echo "✅ ${newEnv} environment healthy. Switching traffic..."
-                if (activeContainer) {
-                    bat "docker stop ${activeContainer} && docker rm ${activeContainer}"
+                    if (healthCheck == 0) {
+                        echo "✅ ${newEnv} environment healthy. Switching traffic..."
+                        // Stop old container
+                        if (activeContainer) {
+                            bat "docker stop ${activeContainer} && docker rm ${activeContainer}"
+                        }
+                    } else {
+                        error("❌ New deployment failed health check.")
+                    }
                 }
-            } else {
-                error("❌ New deployment failed health check.")
             }
         }
     }
-}
-
 
     post {
         success {

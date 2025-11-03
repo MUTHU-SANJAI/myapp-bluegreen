@@ -8,7 +8,7 @@ pipeline {
         BLUE_PORT = "8090"
         GREEN_PORT = "8091"
         DOCKER_USERNAME = "muthusanjai"
-        DOCKER_PASSWORD = "sNCByxHR$Tw9eb!"  // Use Jenkins credentials ideally
+        DOCKER_PASSWORD = "sNCByxHR$Tw9eb!"  // Ideally use Jenkins credentials
     }
 
     stages {
@@ -29,8 +29,9 @@ pipeline {
         stage('Push Docker Image') {
             steps {
                 echo 'Logging in to Docker Hub and pushing image...'
+                // Non-interactive Docker login
                 bat """
-                    docker login -u %DOCKER_USERNAME% -p %DOCKER_PASSWORD%
+                    echo %DOCKER_PASSWORD% | docker login -u %DOCKER_USERNAME% --password-stdin
                     docker push %IMAGE_NAME%:latest
                 """
             }
@@ -62,7 +63,7 @@ pipeline {
             steps {
                 echo 'Checking containers...'
                 bat """
-                    timeout /t 5
+                    timeout /t 5 /nobreak >nul
                     curl http://localhost:%BLUE_PORT%
                     curl http://localhost:%GREEN_PORT%
                 """

@@ -41,7 +41,17 @@ pipeline {
                 script {
                     // Detect currently active container (blue or green)
                     def activeContainer = bat(
-                        script: '@echo off & for /f "tokens=1" %%i in (\'docker ps --filter "name=myapp-" ^| findstr "myapp-" ^| findstr /v "CONTAINER"\') do @echo %%i & goto done & :done',
+                        script: '''
+                            @echo off
+                            setlocal enabledelayedexpansion
+                            set ACTIVE=
+                            for /f "tokens=1*" %%i in ('docker ps --filter "name=myapp-" ^| findstr "myapp-" ^| findstr /v "CONTAINER"') do (
+                                set ACTIVE=%%i
+                                goto :found
+                            )
+                            :found
+                            echo !ACTIVE!
+                        ''',
                         returnStdout: true
                     ).trim()
 

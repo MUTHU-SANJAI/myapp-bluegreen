@@ -96,16 +96,21 @@ pipeline {
                     }
 
                     echo "Waiting for ${inactiveContainer} to start on port ${port}..."
-                    bat "timeout /t 5"
-
-                    echo "Checking health..."
-                    // Basic health check (customize for your app)
-                    try {
-                        bat "curl http://localhost:${port}"
-                        echo "${inactiveContainer} is running successfully!"
-                    } catch (err) {
-                        echo "Health check failed for ${inactiveContainer}"
-                        error "Deployment failed!"
+                    
+                    // Health check loop
+                    for (int i = 0; i < 5; i++) {
+                        echo "Checking if container is responding..."
+                        def result = bat(script: "powershell -Command \"try { (Invoke-WebRequest -Uri http://localhost:${port} -UseBasicParsing).StatusCode } catch { 'FAIL' }\"", returnStdout: true).trim()
+                        
+                        if (result == '200') {
+                            echo "${inactiveContainer} is running successfully!"
+                            break
+                        } else if (i == 4) {
+                            error "Health check failed for ${inactiveContainer}"
+                        } else {
+                            echo "Not ready yet, retrying in 5 seconds..."
+                            sleep 5
+                        }
                     }
                 }
             }

@@ -1,17 +1,16 @@
 const express = require('express');
 const app = express();
-
-const PORT = process.env.PORT || 3000;
-
-app.get('/health', (req, res) => {
-  // include simple dependency checks here later if you need them
-  res.json({status: 'ok', pid: process.pid, env: process.env.NODE_ENV || 'production'});
-});
+const PORT = process.env.PORT || 8080;
 
 app.get('/', (req, res) => {
-  res.send(`Hello from myapp-bluegreen (pid ${process.pid})`);
+    res.send(`Hello from ${process.env.ENVIRONMENT || 'unknown'} environment`);
 });
 
-app.listen(PORT, () => {
-  console.log(`App listening on port ${PORT}`);
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok', env: process.env.ENVIRONMENT || 'unknown' });
+});
+
+// Listen on all interfaces so Docker can expose the port to host
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`App running on port ${PORT}`);
 });

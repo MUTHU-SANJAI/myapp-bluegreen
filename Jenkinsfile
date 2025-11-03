@@ -1,10 +1,10 @@
 pipeline {
     agent any
-
     environment {
-        DOCKER_IMAGE = "muthusanjai/myapp-bluegreen:latest"
+        IMAGE_NAME = "muthusanjai/myapp-bluegreen:latest"
+        PORT_BLUE = "8081"
+        PORT_GREEN = "8082"
     }
-
     stages {
         stage('Checkout') {
             steps {
@@ -15,63 +15,66 @@ pipeline {
 
         stage('Docker Login') {
             steps {
-                echo "Logging in to Docker Hub..."
-                bat """
-                    echo YOUR_DOCKER_PASSWORD | docker login --username YOUR_DOCKER_USERNAME --password-stdin
-                """
+                withCredentials([usernamePassword(credentialsId: 'docker-hub-cred', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    bat 'echo %DOCKER_PASS% | docker login --username %DOCKER_USER% --password-stdin'
+                }
             }
         }
 
         stage('Build Docker Image') {
             steps {
                 echo "Building Docker image..."
-                bat "docker build -t %DOCKER_IMAGE% ."
+                bat "docker build -t %IMAGE_NAME% ."
             }
         }
 
         stage('Push Docker Image') {
             steps {
                 echo "Pushing Docker image to Docker Hub..."
-                bat "docker push %DOCKER_IMAGE%"
+                bat "docker push %IMAGE_NAME%"
             }
         }
 
         stage('Blue-Green Deployment') {
             steps {
                 script {
-                    echo "Detecting active container..."
-                    def active = bat(script: 'docker ps --filter "name=myapp-green" --filter "status=running" --format "{{.Names}}"', returnStdout: true).trim()
-                    echo "Active container: ${active}"
+                    // Detect active container
+                    def activeContainer = bat(returnStdout: true, script: 'docker ps --filter "name=myapp-" --format "{{.Names}}"').trim()
+                    def deployContainer = ""
+                    def deployPort = ""
 
-                    // Determine inactive container and port
-                    def inactive = active == 'myapp-green' ? 'myapp-blue' : 'myapp-green'
-                    def port = active == 'myapp-green' ? '8082' : '8081'  // alternate ports
+                    if (activeContainer.contains("myapp-blue")) {
+                        deployContainer = "myapp-green"
+                        deployPort = PORT_GREEN
+                    } else if (activeContainer.contains("myapp-green")) {
+                        deployContainer = "myapp-blue"
+                        deployPort = PORT_BLUE
+                    } else {
+                        // No container running, start with blue
+                        deployContainer = "myapp-blue"
+                        deployPort = PORT_BLUE
+                    }
 
-                    echo "Deploying new version to inactive container: ${inactive} on port ${port}"
+                    echo "Deploying new version to inactive container: ${deployContainer} on port ${deployPort}"
 
-                    // Remove old inactive container if it exists
-                    bat "docker rm -f ${inactive} || echo No existing container"
+                    // Remove old inactive container if exists
+                    bat "docker rm -f ${deployContainer} || echo No existing container"
 
-                    // Run new container on alternate port
-                    bat "docker run -d --name ${inactive} -p ${port}:8080 %DOCKER_IMAGE%"
+                    // Run new container
+                    bat "docker run -d --name ${deployContainer} -p ${deployPort}:8080 %IMAGE_NAME%"
 
-                    echo "Deployment completed. Access new version on port ${port}"
-                }
-            }
-        }
-
-        stage('Health Check') {
-            steps {
-                script {
-                    echo "Skipping health check for now (add your own check if needed)."
+                    echo "Deployment complete. New container ${deployContainer} running on port ${deployPort}"
                 }
             }
         }
     }
 
     post {
+        always {
+            echo "Pipeline finished."
+        }
         success {
-            echo "Pipeline finished successfully!"
+            echo "Deployment succeeded!"
         }
         failure {
             echo "Pipeline failed. Check logs for details."

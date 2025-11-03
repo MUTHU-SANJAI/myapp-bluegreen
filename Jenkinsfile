@@ -8,7 +8,7 @@ pipeline {
         BLUE_PORT = "8090"
         GREEN_PORT = "8091"
         DOCKER_USERNAME = "muthusanjai"
-        DOCKER_PASSWORD = "sNCByxHR$Tw9eb!"  // Consider using Jenkins Credentials for security
+        DOCKER_PASSWORD = "sNCByxHR$Tw9eb!"  // Use Jenkins credentials ideally
     }
 
     stages {
@@ -38,39 +38,29 @@ pipeline {
 
         stage('Blue-Green Deployment') {
             steps {
-                script {
-                    // Function to stop and remove container if exists
-                    def removeContainer(containerName) {
-                        echo "Stopping and removing ${containerName} if exists..."
-                        bat """
-                        for /F "tokens=*" %%i in ('docker ps -aq -f "name=%${containerName}%"') do (
-                            docker stop %%i
-                            docker rm %%i
-                            echo Removed container %%i
-                        )
-                        """
-                    }
+                echo 'Stopping old containers if they exist...'
+                bat """
+                    for /F "tokens=*" %%i in ('docker ps -aq -f "name=%BLUE_CONTAINER%"') do (
+                        docker stop %%i
+                        docker rm %%i
+                    )
+                    for /F "tokens=*" %%i in ('docker ps -aq -f "name=%GREEN_CONTAINER%"') do (
+                        docker stop %%i
+                        docker rm %%i
+                    )
+                """
 
-                    // Deploy a container
-                    def deployContainer(containerName, port, env) {
-                        echo "Deploying ${containerName} on port ${port}..."
-                        bat "docker run -d --name %${containerName}% -p ${port}:3000 -e ENVIRONMENT=${env} %IMAGE_NAME%:latest"
-                    }
+                echo 'Deploying Blue container...'
+                bat "docker run -d --name %BLUE_CONTAINER% -p %BLUE_PORT%:3000 %IMAGE_NAME%:latest"
 
-                    // Remove old containers
-                    removeContainer(BLUE_CONTAINER)
-                    removeContainer(GREEN_CONTAINER)
-
-                    // Deploy new containers
-                    deployContainer(BLUE_CONTAINER, BLUE_PORT, "blue")
-                    deployContainer(GREEN_CONTAINER, GREEN_PORT, "green")
-                }
+                echo 'Deploying Green container...'
+                bat "docker run -d --name %GREEN_CONTAINER% -p %GREEN_PORT%:3000 %IMAGE_NAME%:latest"
             }
         }
 
         stage('Health Check') {
             steps {
-                echo 'Checking if containers are healthy...'
+                echo 'Checking containers...'
                 bat """
                     timeout /t 5
                     curl http://localhost:%BLUE_PORT%

@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         IMAGE_NAME = 'muthusanjai/myapp-bluegreen'
-        IMAGE_TAG  = 'latest'  // Change if you want versioned tags
+        IMAGE_TAG  = 'latest'  // Update tag if needed
     }
 
     stages {
@@ -26,7 +26,7 @@ pipeline {
         stage('Blue-Green Deployment') {
             steps {
                 script {
-                    // --- Safe stop/remove old Blue container ---
+                    // --- Stop & remove Blue container if exists ---
                     def blueExists = bat(script: 'docker ps -aq -f "name=myapp-blue"', returnStdout: true).trim()
                     if (blueExists) {
                         echo "Stopping and removing old Blue container..."
@@ -36,7 +36,7 @@ pipeline {
                         echo "No Blue container to remove."
                     }
 
-                    // --- Safe stop/remove old Green container ---
+                    // --- Stop & remove Green container if exists ---
                     def greenExists = bat(script: 'docker ps -aq -f "name=myapp-green"', returnStdout: true).trim()
                     if (greenExists) {
                         echo "Stopping and removing old Green container..."
@@ -46,7 +46,7 @@ pipeline {
                         echo "No Green container to remove."
                     }
 
-                    // --- Determine inactive environment to deploy ---
+                    // --- Determine which environment is inactive ---
                     def activeEnv = bat(script: 'docker ps -q -f "name=myapp-blue"', returnStdout: true).trim() ? "green" : "blue"
                     def port = activeEnv == "blue" ? 8090 : 8091
                     echo "Deploying new version to ${activeEnv} environment on port ${port}..."
@@ -54,17 +54,17 @@ pipeline {
                     // --- Run new container ---
                     bat "docker run -d --name myapp-${activeEnv} -p ${port}:8080 -e ENVIRONMENT=${activeEnv} %IMAGE_NAME%:%IMAGE_TAG%"
 
-                    // --- Wait a few seconds for the container to start ---
+                    // --- Wait for the container to start ---
                     sleep(time:5, unit:"SECONDS")
 
-                    // --- Health check using curl ---
+                    // --- Health check ---
                     def response = bat(script: "curl -s http://localhost:${port}/health", returnStdout: true).trim()
                     echo "Health check response: ${response}"
 
                     if (!response.contains('"status":"ok"')) {
                         error("New deployment failed health check.")
                     } else {
-                        echo "New deployment successful! Environment ${activeEnv} is live."
+                        echo "Deployment successful! Environment ${activeEnv} is live."
                     }
                 }
             }
@@ -73,10 +73,10 @@ pipeline {
 
     post {
         failure {
-            echo "Deployment failed. Check console logs for errors."
+            echo "Deployment failed. Check Jenkins logs for details."
         }
         success {
-            echo "Deployment pipeline completed successfully!"
+            echo "Blue-Green deployment completed successfully!"
         }
     }
 }

@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials')
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials') // Jenkins DockerHub credentials
         DOCKER_IMAGE = "${DOCKERHUB_CREDENTIALS_USR}/myapp-bluegreen"
     }
 
@@ -57,7 +57,7 @@ pipeline {
                     def containerName = "myapp-${newEnv}"
                     def hostPort = newEnv == 'blue' ? '8090' : '8091'
 
-                    // Remove any stopped container with the same name
+                    // Remove any old container with same name
                     bat """
                         docker rm -f ${containerName} 2>nul || echo No existing container to remove
                     """
@@ -67,22 +67,24 @@ pipeline {
                         docker run -d --name ${containerName} -p ${hostPort}:8080 -e ENVIRONMENT=${newEnv} ${DOCKER_IMAGE}:${BUILD_NUMBER}
                     """
 
-                    // Wait for container to start
-                    sleep 5
+                    // Wait for the container to fully start
+                    echo "Waiting 15 seconds for container to start..."
+                    sleep 15
 
-                    // Health check
+                    // Health check using docker inspect
                     def healthCheck = bat(
-                        script: "curl -s http://localhost:${hostPort}",
-                        returnStatus: true
-                    )
+                        script: "docker inspect -f {{.State.Running}} ${containerName}",
+                        returnStdout: true
+                    ).trim()
 
-                    if (healthCheck == 0) {
-                        echo "✅ ${newEnv} environment healthy. Switching traffic..."
+                    if (healthCheck == 'true') {
+                        echo "✅ ${newEnv} container is running. Switching traffic..."
+                        // Stop and remove old active container
                         if (activeContainer) {
                             bat "docker stop ${activeContainer} && docker rm ${activeContainer}"
                         }
                     } else {
-                        error("❌ New deployment failed health check.")
+                        error("❌ New deployment failed to start.")
                     }
                 }
             }

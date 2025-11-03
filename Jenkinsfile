@@ -1,12 +1,15 @@
 pipeline {
     agent any
+
     environment {
-        IMAGE_NAME = "muthusanjai/myapp-bluegreen:latest"
-        PORT_BLUE = "8081"
-        PORT_GREEN = "8082"
+        IMAGE_NAME = 'muthusanjai/myapp-bluegreen'
+        DOCKER_CRED_ID = 'docker-hub-cred' // Docker Hub credentials in Jenkins
+        PORT_BLUE = '8081'
+        PORT_GREEN = '8082'
     }
+
     stages {
-        stage('Checkout') {
+        stage('Checkout SCM') {
             steps {
                 echo "Checking out code from GitHub..."
                 checkout scm
@@ -15,8 +18,16 @@ pipeline {
 
         stage('Docker Login') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'docker-hub-cred', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                    bat 'echo %DOCKER_PASS% | docker login --username %DOCKER_USER% --password-stdin'
+                script {
+                    def credsExists = false
+                    try {
+                        withCredentials([usernamePassword(credentialsId: env.DOCKER_CRED_ID, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                            bat 'echo %DOCKER_PASS% | docker login --username %DOCKER_USER% --password-stdin'
+                            credsExists = true
+                        }
+                    } catch (err) {
+                        echo "Docker Hub credentials not found, skipping login."
+                    }
                 }
             }
         }
@@ -24,14 +35,22 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 echo "Building Docker image..."
-                bat "docker build -t %IMAGE_NAME% ."
+                bat "docker build -t ${IMAGE_NAME}:latest ."
             }
         }
 
         stage('Push Docker Image') {
             steps {
-                echo "Pushing Docker image to Docker Hub..."
-                bat "docker push %IMAGE_NAME%"
+                script {
+                    try {
+                        withCredentials([usernamePassword(credentialsId: env.DOCKER_CRED_ID, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                            echo "Pushing Docker image to Docker Hub..."
+                            bat "docker push ${IMAGE_NAME}:latest"
+                        }
+                    } catch (err) {
+                        echo "Skipping push because Docker credentials are missing."
+                    }
+                }
             }
         }
 
@@ -39,31 +58,55 @@ pipeline {
             steps {
                 script {
                     // Detect active container
-                    def activeContainer = bat(returnStdout: true, script: 'docker ps --filter "name=myapp-" --format "{{.Names}}"').trim()
-                    def deployContainer = ""
-                    def deployPort = ""
+                    def activeContainer = bat(script: 'docker ps --filter "name=myapp-" --format "{{.Names}}"', returnStdout: true).trim()
+                    def inactiveContainer = ''
+                    def port = ''
 
-                    if (activeContainer.contains("myapp-blue")) {
-                        deployContainer = "myapp-green"
-                        deployPort = PORT_GREEN
-                    } else if (activeContainer.contains("myapp-green")) {
-                        deployContainer = "myapp-blue"
-                        deployPort = PORT_BLUE
+                    if (activeContainer.contains('myapp-blue')) {
+                        inactiveContainer = 'myapp-green'
+                        port = PORT_GREEN
                     } else {
-                        // No container running, start with blue
-                        deployContainer = "myapp-blue"
-                        deployPort = PORT_BLUE
+                        inactiveContainer = 'myapp-blue'
+                        port = PORT_BLUE
                     }
 
-                    echo "Deploying new version to inactive container: ${deployContainer} on port ${deployPort}"
+                    echo "Deploying new version to inactive container: ${inactiveContainer} on port ${port}"
 
-                    // Remove old inactive container if exists
-                    bat "docker rm -f ${deployContainer} || echo No existing container"
+                    // Remove existing inactive container
+                    bat "docker rm -f ${inactiveContainer} || echo No existing container"
 
-                    // Run new container
-                    bat "docker run -d --name ${deployContainer} -p ${deployPort}:8080 %IMAGE_NAME%"
+                    // Start new inactive container
+                    bat "docker run -d --name ${inactiveContainer} -p ${port}:8080 ${IMAGE_NAME}:latest"
 
-                    echo "Deployment complete. New container ${deployContainer} running on port ${deployPort}"
+                    echo "Deployment complete. Switch traffic to ${inactiveContainer} manually or via load balancer."
+                }
+            }
+        }
+
+        stage('Health Check') {
+            steps {
+                script {
+                    def port = PORT_BLUE
+                    def inactiveContainer = 'myapp-blue'
+
+                    def activeContainer = bat(script: 'docker ps --filter "name=myapp-" --format "{{.Names}}"', returnStdout: true).trim()
+                    if (activeContainer.contains('myapp-blue')) {
+                        inactiveContainer = 'myapp-green'
+                        port = PORT_GREEN
+                    }
+
+                    echo "Waiting for ${inactiveContainer} to start on port ${port}..."
+                    bat "timeout /t 5"
+
+                    echo "Checking health..."
+                    // Basic health check (customize for your app)
+                    try {
+                        bat "curl http://localhost:${port}"
+                        echo "${inactiveContainer} is running successfully!"
+                    } catch (err) {
+                        echo "Health check failed for ${inactiveContainer}"
+                        error "Deployment failed!"
+                    }
                 }
             }
         }
@@ -77,7 +120,7 @@ pipeline {
             echo "Deployment succeeded!"
         }
         failure {
-            echo "Pipeline failed. Check logs for details."
+            echo "Deployment failed. Check logs."
         }
     }
 }

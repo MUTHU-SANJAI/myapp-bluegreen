@@ -110,12 +110,14 @@ pipeline {
 
                     for (int i = 1; i <= maxRetries; i++) {
                         echo "Attempt ${i}..."
+
                         def rawOutput = bat(
-                            script: "curl -s -o NUL -w %%{http_code} http://localhost:${port}",
+                            script: """
+                                for /f %%i in ('curl -s -o NUL -w "%%{http_code}" http://localhost:${port}') do @echo %%i
+                            """,
                             returnStdout: true
                         ).trim()
 
-                        // Extract only the digits from the output (e.g., 200)
                         def status = rawOutput.replaceAll(/[^0-9]/, "")
                         echo "HTTP status: ${status}"
 

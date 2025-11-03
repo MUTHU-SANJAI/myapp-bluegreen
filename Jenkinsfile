@@ -36,40 +36,37 @@ pipeline {
             }
         }
 
-        stage('Blue-Green Deploy') {
-            steps {
-                script {
-                    // Check which environment is currently active
-                    def activeContainer = sh(script: "docker ps --filter 'name=myapp-' --format '{{.Names}}' | head -n 1", returnStdout: true).trim()
-                    def newEnv = activeContainer.contains('blue') ? 'green' : 'blue'
+       stage('Blue-Green Deploy') {
+    steps {
+        script {
+            // Check active environment
+            def activeContainer = bat(script: "docker ps --filter \"name=myapp-\" --format \"{{.Names}}\" | head -n 1", returnStdout: true).trim()
+            def newEnv = activeContainer.contains('blue') ? 'green' : 'blue'
 
-                    echo "Deploying new version to ${newEnv} environment..."
+            echo "Deploying new version to ${newEnv} environment..."
 
-                    // Run new container in inactive environment
-                    sh """
-                        docker run -d --name myapp-${newEnv} -p ${newEnv == 'blue' ? '8080:8080' : '8081:8080'} \
-                        -e ENVIRONMENT=${newEnv} ${DOCKER_IMAGE}:${BUILD_NUMBER}
-                    """
+            // Run new container
+            bat """
+                docker run -d --name myapp-${newEnv} -p ${newEnv == 'blue' ? '8080:8080' : '8081:8080'} -e ENVIRONMENT=${newEnv} ${DOCKER_IMAGE}:${BUILD_NUMBER}
+            """
 
-                    // Wait for container to start
-                    sleep 5
+            // Wait and health check
+            sleep 5
 
-                    // Health check on new container
-                    def healthCheck = sh(script: "curl -s http://localhost:${newEnv == 'blue' ? '8080' : '8081'}", returnStatus: true)
+            def healthCheck = bat(script: "curl -s http://localhost:${newEnv == 'blue' ? '8080' : '8081'}", returnStatus: true)
 
-                    if (healthCheck == 0) {
-                        echo "✅ ${newEnv} environment healthy. Switching traffic..."
-                        // Stop old container after new one is healthy
-                        if (activeContainer) {
-                            sh "docker stop ${activeContainer} && docker rm ${activeContainer}"
-                        }
-                    } else {
-                        error("❌ New deployment failed health check.")
-                    }
+            if (healthCheck == 0) {
+                echo "✅ ${newEnv} environment healthy. Switching traffic..."
+                if (activeContainer) {
+                    bat "docker stop ${activeContainer} && docker rm ${activeContainer}"
                 }
+            } else {
+                error("❌ New deployment failed health check.")
             }
         }
     }
+}
+
 
     post {
         success {

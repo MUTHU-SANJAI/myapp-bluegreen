@@ -110,7 +110,7 @@ pipeline {
                     for (int i = 1; i <= maxRetries; i++) {
                         echo "Attempt ${i}..."
                         def status = bat(
-                            script: 'curl -s -o NUL -w "%{http_code}" http://localhost:' + port,
+                            script: "curl -s -o NUL -w %%{http_code} http://localhost:${port}",
                             returnStdout: true
                         ).trim()
 

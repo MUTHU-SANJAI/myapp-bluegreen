@@ -23,7 +23,7 @@ pipeline {
         stage('Blue-Green Deployment') {
             steps {
                 script {
-                    // --- Stop and remove old containers if they exist ---
+                    // --- Stop/remove old containers if they exist ---
                     def blueExists = bat(script: 'docker ps -aq -f "name=myapp-blue"', returnStdout: true).trim()
                     if (blueExists) {
                         echo "Stopping and removing old Blue container..."

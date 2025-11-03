@@ -19,11 +19,9 @@ pipeline {
         stage('Docker Login') {
             steps {
                 script {
-                    def credsExists = false
                     try {
                         withCredentials([usernamePassword(credentialsId: env.DOCKER_CRED_ID, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                             bat 'echo %DOCKER_PASS% | docker login --username %DOCKER_USER% --password-stdin'
-                            credsExists = true
                         }
                     } catch (err) {
                         echo "Docker Hub credentials not found, skipping login."
@@ -96,12 +94,12 @@ pipeline {
                     }
 
                     echo "Waiting for ${inactiveContainer} to start on port ${port}..."
-                    
-                    // Health check loop
+
+                    // Health check loop using curl
                     for (int i = 0; i < 5; i++) {
                         echo "Checking if container is responding..."
-                        def result = bat(script: "powershell -Command \"try { (Invoke-WebRequest -Uri http://localhost:${port} -UseBasicParsing).StatusCode } catch { 'FAIL' }\"", returnStdout: true).trim()
-                        
+                        def result = bat(script: "curl -s -o NUL -w \"%{http_code}\" http://localhost:${port}", returnStdout: true).trim()
+
                         if (result == '200') {
                             echo "${inactiveContainer} is running successfully!"
                             break

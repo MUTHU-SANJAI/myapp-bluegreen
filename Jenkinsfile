@@ -1,48 +1,147 @@
-stage('Health Check') {
-    steps {
-        script {
-            // Determine inactive container and port
-            def activeContainer = bat(
-                script: 'docker ps --filter "name=myapp-" --format "{{.Names}}"',
-                returnStdout: true
-            ).trim()
-            
-            def inactiveContainer = 'myapp-blue'
-            def port = PORT_BLUE
-            if (activeContainer.contains('myapp-blue')) {
-                inactiveContainer = 'myapp-green'
-                port = PORT_GREEN
+pipeline {
+    agent any
+
+    environment {
+        IMAGE_NAME = 'muthusanjai/myapp-bluegreen'
+        DOCKER_CRED_ID = 'docker-hub-cred' // Docker Hub credentials in Jenkins
+        PORT_BLUE = '8081'
+        PORT_GREEN = '8082'
+    }
+
+    stages {
+
+        stage('Checkout SCM') {
+            steps {
+                echo "Checking out code from GitHub..."
+                checkout scm
             }
+        }
 
-            echo "Waiting for ${inactiveContainer} to start on port ${port}..."
+        stage('Docker Login') {
+            steps {
+                script {
+                    try {
+                        withCredentials([usernamePassword(credentialsId: env.DOCKER_CRED_ID, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                            bat 'echo %DOCKER_PASS% | docker login --username %DOCKER_USER% --password-stdin'
+                        }
+                    } catch (err) {
+                        echo "Docker Hub credentials not found, skipping login."
+                    }
+                }
+            }
+        }
 
-            // Retry loop: check every 5 seconds, max 10 attempts
-            def maxRetries = 10
-            def sleepSeconds = 5
-            def success = false
+        stage('Build Docker Image') {
+            steps {
+                echo "Building Docker image..."
+                bat "docker build -t ${IMAGE_NAME}:latest ."
+            }
+        }
 
-            for (int i = 0; i < maxRetries; i++) {
-                echo "Checking if container is responding (attempt ${i + 1}/${maxRetries})..."
-                
-                // Windows-friendly curl command to get HTTP status code
-                def result = bat(
-                    script: "curl -s -o NUL -w \"%{http_code}\" \"http://localhost:${port}\"",
+        stage('Push Docker Image') {
+            steps {
+                script {
+                    try {
+                        withCredentials([usernamePassword(credentialsId: env.DOCKER_CRED_ID, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                            echo "Pushing Docker image to Docker Hub..."
+                            bat "docker push ${IMAGE_NAME}:latest"
+                        }
+                    } catch (err) {
+                        echo "Skipping push because Docker credentials are missing."
+                    }
+                }
+            }
+        }
+
+        stage('Blue-Green Deployment') {
+            steps {
+                script {
+                    // Detect active container
+                    def activeContainer = bat(
+                        script: 'docker ps --filter "name=myapp-" --format "{{.Names}}"',
+                        returnStdout: true
+                    ).trim()
+                    def inactiveContainer = ''
+                    def port = ''
+
+                    if (activeContainer.contains('myapp-blue')) {
+                        inactiveContainer = 'myapp-green'
+                        port = PORT_GREEN
+                    } else {
+                        inactiveContainer = 'myapp-blue'
+                        port = PORT_BLUE
+                    }
+
+                    echo "Deploying new version to inactive container: ${inactiveContainer} on port ${port}"
+
+                    // Remove existing inactive container
+                    bat "docker rm -f ${inactiveContainer} || echo No existing container"
+
+                    // Start new inactive container
+                    bat "docker run -d --name ${inactiveContainer} -p ${port}:8080 ${IMAGE_NAME}:latest"
+
+                    echo "Deployment complete. Switch traffic to ${inactiveContainer} manually or via load balancer."
+                }
+            }
+        }
+
+        stage('Health Check') {
+            script {
+                // Determine inactive container and port
+                def activeContainer = bat(
+                    script: 'docker ps --filter "name=myapp-" --format "{{.Names}}"',
                     returnStdout: true
                 ).trim()
 
-                if (result == '200') {
-                    echo "${inactiveContainer} is running successfully!"
-                    success = true
-                    break
-                } else {
-                    echo "Container not ready yet (status: ${result}), retrying in ${sleepSeconds} seconds..."
-                    sleep sleepSeconds
+                def inactiveContainer = 'myapp-blue'
+                def port = PORT_BLUE
+                if (activeContainer.contains('myapp-blue')) {
+                    inactiveContainer = 'myapp-green'
+                    port = PORT_GREEN
+                }
+
+                echo "Waiting for ${inactiveContainer} to start on port ${port}..."
+
+                // Retry loop: check every 5 seconds, max 10 attempts
+                def maxRetries = 10
+                def sleepSeconds = 5
+                def success = false
+
+                for (int i = 0; i < maxRetries; i++) {
+                    echo "Checking if container is responding (attempt ${i + 1}/${maxRetries})..."
+                    
+                    // Windows-friendly curl command
+                    def result = bat(
+                        script: "curl -s -o NUL -w \"%{http_code}\" \"http://localhost:${port}\"",
+                        returnStdout: true
+                    ).trim()
+
+                    if (result == '200') {
+                        echo "${inactiveContainer} is running successfully!"
+                        success = true
+                        break
+                    } else {
+                        echo "Container not ready yet (status: ${result}), retrying in ${sleepSeconds} seconds..."
+                        sleep sleepSeconds
+                    }
+                }
+
+                if (!success) {
+                    error "Health check failed for ${inactiveContainer} after ${maxRetries} attempts"
                 }
             }
+        }
+    }
 
-            if (!success) {
-                error "Health check failed for ${inactiveContainer} after ${maxRetries} attempts"
-            }
+    post {
+        always {
+            echo "Pipeline finished."
+        }
+        success {
+            echo "Deployment succeeded!"
+        }
+        failure {
+            echo "Deployment failed. Check logs."
         }
     }
 }

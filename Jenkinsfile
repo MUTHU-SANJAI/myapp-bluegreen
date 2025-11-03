@@ -8,7 +8,7 @@ pipeline {
         BLUE_PORT = "8090"
         GREEN_PORT = "8091"
         DOCKER_USERNAME = "muthusanjai"
-        DOCKER_PASSWORD = "sNCByxHR\$Tw9eb!"  // Escaped $ for batch
+        DOCKER_PASSWORD = "sNCByxHR$Tw9eb!"  // Ideally use Jenkins credentials for security
     }
 
     stages {
@@ -28,54 +28,44 @@ pipeline {
 
         stage('Push Docker Image') {
             steps {
-                echo 'Logging in to Docker Hub and pushing image...'
-                bat """
-                    echo %DOCKER_PASSWORD% | docker login -u %DOCKER_USERNAME% --password-stdin
-                    docker push %IMAGE_NAME%:latest
-                """
+                echo 'Logging in to Docker Hub...'
+                bat "docker login -u %DOCKER_USERNAME% -p %DOCKER_PASSWORD%"
+                echo 'Pushing Docker image...'
+                bat "docker push %IMAGE_NAME%:latest"
             }
         }
 
         stage('Blue-Green Deployment') {
             steps {
                 script {
-                    echo 'Determining active and inactive containers...'
-
-                    def activeContainer = bat(
-                        returnStdout: true,
-                        script: "docker ps --filter 'name=%BLUE_CONTAINER%' --format \"{{.Names}}\""
-                    ).trim()
-
-                    def inactiveContainer = activeContainer == env.BLUE_CONTAINER ? env.GREEN_CONTAINER : env.BLUE_CONTAINER
-                    def inactivePort = inactiveContainer == env.BLUE_CONTAINER ? env.BLUE_PORT : env.GREEN_PORT
+                    // Determine which container is currently active
+                    def activeContainer = bat(returnStdout: true, script: "docker ps --filter \"name=%BLUE_CONTAINER%\" --format \"{{.Names}}\"").trim()
+                    def inactiveContainer = activeContainer == BLUE_CONTAINER ? GREEN_CONTAINER : BLUE_CONTAINER
+                    def inactivePort = inactiveContainer == BLUE_CONTAINER ? BLUE_PORT : GREEN_PORT
 
                     echo "Active container: ${activeContainer ?: 'None'}"
                     echo "Deploying new version to inactive container: ${inactiveContainer}"
 
-                    // Remove old inactive container if exists
-                    bat """
-                        for /F "tokens=*" %%i in ('docker ps -aq -f "name=${inactiveContainer}"') do (
-                            docker stop %%i
-                            docker rm %%i
-                            echo Removed old ${inactiveContainer} container %%i
-                        )
-                    """
+                    echo "Stopping old inactive container if exists..."
+                    bat "for /F \"tokens=*\" %%i in ('docker ps -aq -f \"name=${inactiveContainer}\"') do docker stop %%i"
+                    bat "for /F \"tokens=*\" %%i in ('docker ps -aq -f \"name=${inactiveContainer}\"') do docker rm %%i"
 
-                    // Run new inactive container
-                    bat "docker run -d --name ${inactiveContainer} -p ${inactivePort}:3000 %IMAGE_NAME%:latest"
+                    echo "Running new inactive container..."
+                    bat "docker run -d --name ${inactiveContainer} -p ${inactivePort}:3000 -e ENVIRONMENT=${inactiveContainer} %IMAGE_NAME%:latest"
 
-                    // Health check
                     echo "Waiting 5 seconds for container to start..."
                     bat "timeout /t 5 /nobreak >nul"
+
+                    echo "Health check..."
                     bat "curl http://localhost:${inactivePort}"
 
-                    // Stop the previously active container to switch traffic
-                    if (activeContainer) {
-                        echo "Stopping previously active container: ${activeContainer}"
-                        bat """
-                            docker stop ${activeContainer}
-                            docker rm ${activeContainer}
-                        """
+                    echo "Switching traffic to new container..."
+                    if (inactiveContainer == BLUE_CONTAINER) {
+                        bat "docker stop %GREEN_CONTAINER%"
+                        bat "docker rm %GREEN_CONTAINER%"
+                    } else {
+                        bat "docker stop %BLUE_CONTAINER%"
+                        bat "docker rm %BLUE_CONTAINER%"
                     }
 
                     echo "Deployment of ${inactiveContainer} completed successfully!"
@@ -85,19 +75,16 @@ pipeline {
 
         stage('Health Check') {
             steps {
-                echo 'Checking both containers...'
-                bat """
-                    timeout /t 5 /nobreak >nul
-                    curl http://localhost:%BLUE_PORT%
-                    curl http://localhost:%GREEN_PORT%
-                """
+                echo 'Checking if containers are healthy...'
+                bat "curl http://localhost:%BLUE_PORT%"
+                bat "curl http://localhost:%GREEN_PORT%"
             }
         }
     }
 
     post {
         success {
-            echo 'Pipeline and deployment completed successfully!'
+            echo 'Pipeline completed successfully!'
         }
         failure {
             echo 'Pipeline failed. Check logs for details.'

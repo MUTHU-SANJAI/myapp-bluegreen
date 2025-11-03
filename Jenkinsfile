@@ -2,101 +2,62 @@ pipeline {
     agent any
 
     environment {
-        DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials') // Jenkins DockerHub credentials
-        DOCKER_IMAGE = "${DOCKERHUB_CREDENTIALS_USR}/myapp-bluegreen"
+        IMAGE_NAME = 'muthusanjai/myapp-bluegreen'
+        LOCAL_IMAGE_TAG = 'local'
     }
 
     stages {
         stage('Checkout') {
             steps {
-                git branch: 'main', url: 'https://github.com/MUTHU-SANJAI/myapp-bluegreen.git'
+                git branch: 'main',
+                    url: 'https://github.com/MUTHU-SANJAI/myapp-bluegreen.git'
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                script {
-                    dockerImage = docker.build("${DOCKER_IMAGE}:${BUILD_NUMBER}")
-                }
+                bat "docker build -t %IMAGE_NAME%:%LOCAL_IMAGE_TAG% ."
             }
         }
 
-        stage('Push to Docker Hub') {
+        stage('Blue-Green Deployment') {
             steps {
                 script {
-                    docker.withRegistry('', 'dockerhub-credentials') {
-                        dockerImage.push("${BUILD_NUMBER}")
-                        dockerImage.push("latest")
-                    }
-                }
-            }
-        }
-
-        stage('Blue-Green Deploy') {
-            steps {
-                script {
-                    // Detect currently active container
-                    def activeContainer = bat(
-                        script: '''
-                            @echo off
-                            setlocal enabledelayedexpansion
-                            set ACTIVE=
-                            for /f "tokens=1*" %%i in ('docker ps --filter "name=myapp-" ^| findstr "myapp-" ^| findstr /v "CONTAINER"') do (
-                                set ACTIVE=%%i
-                                goto :found
-                            )
-                            :found
-                            echo !ACTIVE!
-                        ''',
-                        returnStdout: true
-                    ).trim()
-
-                    // Determine new environment
-                    def newEnv = activeContainer.contains('blue') ? 'green' : 'blue'
-                    echo "Deploying new version to ${newEnv} environment..."
-
-                    def containerName = "myapp-${newEnv}"
-                    def hostPort = newEnv == 'blue' ? '8090' : '8091'
-
-                    // Stop and remove old container safely
-                    if (activeContainer) {
-                        bat """
-                            docker stop ${activeContainer} 2>nul || echo Container not running
-                            docker rm ${activeContainer} 2>nul || echo Container already removed
-                        """
+                    // Check if Blue container exists
+                    def blueExists = bat(script: 'docker ps -aq -f "name=myapp-blue"', returnStdout: true).trim()
+                    if (blueExists) {
+                        bat "docker stop myapp-blue"
+                        bat "docker rm myapp-blue"
                     }
 
-                    // Run new container
-                    bat """
-                        docker run -d --name ${containerName} -p ${hostPort}:8080 -e ENVIRONMENT=${newEnv} ${DOCKER_IMAGE}:${BUILD_NUMBER}
-                    """
+                    // Check if Green container exists
+                    def greenExists = bat(script: 'docker ps -aq -f "name=myapp-green"', returnStdout: true).trim()
+                    if (greenExists) {
+                        bat "docker stop myapp-green"
+                        bat "docker rm myapp-green"
+                    }
 
-                    // Wait for container to start
-                    echo "Waiting 15 seconds for container to start..."
-                    sleep 15
+                    // Decide which environment to deploy
+                    def activeEnv = bat(script: 'docker ps -q -f "name=myapp-blue"', returnStdout: true).trim() ? "green" : "blue"
+                    def port = activeEnv == "blue" ? 8090 : 8091
 
-                    // Health check using docker ps (Windows-friendly)
-                    def healthCheck = bat(
-                        script: "docker ps --filter name=${containerName} --format {{.Status}}",
-                        returnStdout: true
-                    ).trim()
+                    echo "Deploying new version to ${activeEnv} environment on port ${port}"
 
-                    if (healthCheck.contains("Up")) {
-                        echo "✅ ${newEnv} container is running. Deployment successful!"
+                    // Run the container
+                    bat "docker run -d --name myapp-${activeEnv} -p ${port}:8080 -e ENVIRONMENT=${activeEnv} %IMAGE_NAME%:%LOCAL_IMAGE_TAG%"
+
+                    // Wait a few seconds for app to start
+                    sleep(time:5, unit:"SECONDS")
+
+                    // Health check
+                    def response = bat(script: "powershell -Command \"Invoke-WebRequest http://localhost:${port}/health -UseBasicParsing | Select-Object -ExpandProperty Content\"", returnStdout: true).trim()
+                    if (!response.contains('"status":"ok"')) {
+                        error("New deployment failed health check.")
                     } else {
-                        error("❌ New deployment failed to start.")
+                        echo "New deployment successful! Environment ${activeEnv} is live."
                     }
                 }
             }
-        }
-    }
-
-    post {
-        success {
-            echo "Pipeline completed successfully!"
-        }
-        failure {
-            echo "Pipeline failed. Check console output for details."
         }
     }
 }

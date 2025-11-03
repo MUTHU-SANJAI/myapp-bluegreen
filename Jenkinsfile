@@ -26,11 +26,9 @@ pipeline {
 
         stage('Push Docker Image') {
             steps {
-                echo 'Logging in to Docker Hub...'
-                // Use Jenkins credentials (ID: docker-hub)
+                echo 'Logging in to Docker Hub and pushing image...'
                 withCredentials([usernamePassword(credentialsId: 'docker-hub', usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
                     bat """
-                        echo Logging in...
                         echo %DOCKER_PASSWORD% | docker login --username %DOCKER_USERNAME% --password-stdin
                         docker push %IMAGE_NAME%:latest
                     """
@@ -41,17 +39,15 @@ pipeline {
         stage('Blue-Green Deployment') {
             steps {
                 script {
-                    echo 'Starting Blue-Green Deployment...'
-
-                    // Determine which container is currently active
-                    def activeContainer = bat(returnStdout: true, script: "docker ps --filter name=%BLUE_CONTAINER% --format \"{{.Names}}\"").trim()
+                    echo 'Determining active container...'
+                    def activeContainer = bat(returnStdout: true, script: "docker ps --filter name=%BLUE_CONTAINER% --format {{.Names}}").trim()
                     def inactiveContainer = activeContainer == env.BLUE_CONTAINER ? env.GREEN_CONTAINER : env.BLUE_CONTAINER
                     def inactivePort = inactiveContainer == env.BLUE_CONTAINER ? env.BLUE_PORT : env.GREEN_PORT
 
                     echo "Active container: ${activeContainer ?: 'None'}"
-                    echo "Deploying new version to inactive container: ${inactiveContainer}"
+                    echo "Deploying to inactive container: ${inactiveContainer}"
 
-                    // Stop and remove old inactive container
+                    // Stop old inactive container
                     bat """
                         for /F "tokens=*" %%i in ('docker ps -aq -f "name=${inactiveContainer}"') do (
                             docker stop %%i
@@ -61,32 +57,22 @@ pipeline {
                     """
 
                     // Run new inactive container
-                    bat "docker run -d --name ${inactiveContainer} -p ${inactivePort}:3000 -e ENVIRONMENT=${inactiveContainer} %IMAGE_NAME%:latest"
+                    bat "docker run -d --name ${inactiveContainer} -p ${inactivePort}:3000 %IMAGE_NAME%:latest"
 
                     // Health check
                     echo "Waiting 5 seconds for container to start..."
                     bat "timeout /t 5"
                     bat "curl http://localhost:${inactivePort}"
 
-                    // Optional: Stop old active container if exists
-                    if (activeContainer) {
-                        echo "Stopping old active container: ${activeContainer}"
-                        bat """
-                            docker stop ${activeContainer}
-                            docker rm ${activeContainer}
-                        """
-                    }
-
-                    echo "Blue-Green Deployment of ${inactiveContainer} completed successfully!"
+                    echo "Blue-Green deployment step completed!"
                 }
             }
         }
 
         stage('Health Check') {
             steps {
-                echo 'Performing final health check on both containers...'
+                echo 'Checking if containers are healthy...'
                 bat """
-                    timeout /t 5
                     curl http://localhost:%BLUE_PORT%
                     curl http://localhost:%GREEN_PORT%
                 """
@@ -96,7 +82,7 @@ pipeline {
 
     post {
         success {
-            echo 'Pipeline completed successfully!'
+            echo 'Pipeline and deployment completed successfully!'
         }
         failure {
             echo 'Pipeline failed. Check logs for details.'

@@ -20,7 +20,13 @@ pipeline {
             steps {
                 script {
                     try {
-                        withCredentials([usernamePassword(credentialsId: env.DOCKER_CRED_ID, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                        withCredentials([
+                            usernamePassword(
+                                credentialsId: env.DOCKER_CRED_ID,
+                                usernameVariable: 'DOCKER_USER',
+                                passwordVariable: 'DOCKER_PASS'
+                            )
+                        ]) {
                             bat 'echo %DOCKER_PASS% | docker login --username %DOCKER_USER% --password-stdin'
                         }
                     } catch (err) {
@@ -41,7 +47,13 @@ pipeline {
             steps {
                 script {
                     try {
-                        withCredentials([usernamePassword(credentialsId: env.DOCKER_CRED_ID, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                        withCredentials([
+                            usernamePassword(
+                                credentialsId: env.DOCKER_CRED_ID,
+                                usernameVariable: 'DOCKER_USER',
+                                passwordVariable: 'DOCKER_PASS'
+                            )
+                        ]) {
                             echo "Pushing Docker image to Docker Hub..."
                             bat "docker push ${IMAGE_NAME}:latest"
                         }
@@ -56,7 +68,10 @@ pipeline {
             steps {
                 script {
                     // Detect active container
-                    def activeContainer = bat(script: 'docker ps --filter "name=myapp-" --format "{{.Names}}"', returnStdout: true).trim()
+                    def activeContainer = bat(
+                        script: 'docker ps --filter "name=myapp-" --format "{{.Names}}"',
+                        returnStdout: true
+                    ).trim()
                     def inactiveContainer = ''
                     def port = ''
 
@@ -87,7 +102,11 @@ pipeline {
                     def port = PORT_BLUE
                     def inactiveContainer = 'myapp-blue'
 
-                    def activeContainer = bat(script: 'docker ps --filter "name=myapp-" --format "{{.Names}}"', returnStdout: true).trim()
+                    def activeContainer = bat(
+                        script: 'docker ps --filter "name=myapp-" --format "{{.Names}}"',
+                        returnStdout: true
+                    ).trim()
+
                     if (activeContainer.contains('myapp-blue')) {
                         inactiveContainer = 'myapp-green'
                         port = PORT_GREEN
@@ -95,10 +114,13 @@ pipeline {
 
                     echo "Waiting for ${inactiveContainer} to start on port ${port}..."
 
-                    // Health check loop using curl
+                    // Health check loop using Windows-friendly curl
                     for (int i = 0; i < 5; i++) {
                         echo "Checking if container is responding..."
-                        def result = bat(script: "curl -s -o NUL -w \"%{http_code}\" http://localhost:${port}", returnStdout: true).trim()
+                        def result = bat(
+                            script: "curl -s -o NUL -w \"%{http_code}\" \"http://localhost:${port}\"",
+                            returnStdout: true
+                        ).trim()
 
                         if (result == '200') {
                             echo "${inactiveContainer} is running successfully!"

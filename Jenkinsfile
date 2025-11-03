@@ -9,7 +9,6 @@ pipeline {
     }
 
     stages {
-
         stage('Checkout SCM') {
             steps {
                 echo "Checking out code from GitHub..."
@@ -21,7 +20,13 @@ pipeline {
             steps {
                 script {
                     try {
-                        withCredentials([usernamePassword(credentialsId: env.DOCKER_CRED_ID, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                        withCredentials([
+                            usernamePassword(
+                                credentialsId: env.DOCKER_CRED_ID,
+                                usernameVariable: 'DOCKER_USER',
+                                passwordVariable: 'DOCKER_PASS'
+                            )
+                        ]) {
                             bat 'echo %DOCKER_PASS% | docker login --username %DOCKER_USER% --password-stdin'
                         }
                     } catch (err) {
@@ -42,7 +47,13 @@ pipeline {
             steps {
                 script {
                     try {
-                        withCredentials([usernamePassword(credentialsId: env.DOCKER_CRED_ID, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                        withCredentials([
+                            usernamePassword(
+                                credentialsId: env.DOCKER_CRED_ID,
+                                usernameVariable: 'DOCKER_USER',
+                                passwordVariable: 'DOCKER_PASS'
+                            )
+                        ]) {
                             echo "Pushing Docker image to Docker Hub..."
                             bat "docker push ${IMAGE_NAME}:latest"
                         }
@@ -86,48 +97,41 @@ pipeline {
         }
 
         stage('Health Check') {
-            script {
-                // Determine inactive container and port
-                def activeContainer = bat(
-                    script: 'docker ps --filter "name=myapp-" --format "{{.Names}}"',
-                    returnStdout: true
-                ).trim()
+            steps {
+                script {
+                    def port = PORT_BLUE
+                    def inactiveContainer = 'myapp-blue'
 
-                def inactiveContainer = 'myapp-blue'
-                def port = PORT_BLUE
-                if (activeContainer.contains('myapp-blue')) {
-                    inactiveContainer = 'myapp-green'
-                    port = PORT_GREEN
-                }
-
-                echo "Waiting for ${inactiveContainer} to start on port ${port}..."
-
-                // Retry loop: check every 5 seconds, max 10 attempts
-                def maxRetries = 10
-                def sleepSeconds = 5
-                def success = false
-
-                for (int i = 0; i < maxRetries; i++) {
-                    echo "Checking if container is responding (attempt ${i + 1}/${maxRetries})..."
-                    
-                    // Windows-friendly curl command
-                    def result = bat(
-                        script: "curl -s -o NUL -w \"%{http_code}\" \"http://localhost:${port}\"",
+                    def activeContainer = bat(
+                        script: 'docker ps --filter "name=myapp-" --format "{{.Names}}"',
                         returnStdout: true
                     ).trim()
 
-                    if (result == '200') {
-                        echo "${inactiveContainer} is running successfully!"
-                        success = true
-                        break
-                    } else {
-                        echo "Container not ready yet (status: ${result}), retrying in ${sleepSeconds} seconds..."
-                        sleep sleepSeconds
+                    if (activeContainer.contains('myapp-blue')) {
+                        inactiveContainer = 'myapp-green'
+                        port = PORT_GREEN
                     }
-                }
 
-                if (!success) {
-                    error "Health check failed for ${inactiveContainer} after ${maxRetries} attempts"
+                    echo "Waiting for ${inactiveContainer} to start on port ${port}..."
+
+                    // Health check loop using Windows-friendly curl
+                    for (int i = 0; i < 5; i++) {
+                        echo "Checking if container is responding..."
+                        def result = bat(
+                            script: "curl -s -o NUL -w \"%{http_code}\" \"http://localhost:${port}\"",
+                            returnStdout: true
+                        ).trim()
+
+                        if (result == '200') {
+                            echo "${inactiveContainer} is running successfully!"
+                            break
+                        } else if (i == 4) {
+                            error "Health check failed for ${inactiveContainer}"
+                        } else {
+                            echo "Not ready yet, retrying in 5 seconds..."
+                            sleep 5
+                        }
+                    }
                 }
             }
         }

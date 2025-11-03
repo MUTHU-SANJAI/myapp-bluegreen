@@ -35,7 +35,7 @@ pipeline {
         stage('Blue-Green Deploy') {
             steps {
                 script {
-                    // Detect active container (blue or green)
+                    // Detect currently active container (blue or green)
                     def activeContainer = bat(
                         script: '''
                             @echo off
@@ -54,12 +54,17 @@ pipeline {
                     def newEnv = activeContainer.contains('blue') ? 'green' : 'blue'
                     echo "Deploying new version to ${newEnv} environment..."
 
-                    // Use safe host ports to avoid conflicts
-                    def port = newEnv == 'blue' ? '8090:8080' : '8091:8080'
+                    def containerName = "myapp-${newEnv}"
+                    def hostPort = newEnv == 'blue' ? '8090' : '8091'
+
+                    // Remove any stopped container with the same name
+                    bat """
+                        docker rm -f ${containerName} 2>nul || echo No existing container to remove
+                    """
 
                     // Run new container
                     bat """
-                        docker run -d --name myapp-${newEnv} -p ${port} -e ENVIRONMENT=${newEnv} ${DOCKER_IMAGE}:${BUILD_NUMBER}
+                        docker run -d --name ${containerName} -p ${hostPort}:8080 -e ENVIRONMENT=${newEnv} ${DOCKER_IMAGE}:${BUILD_NUMBER}
                     """
 
                     // Wait for container to start
@@ -67,7 +72,7 @@ pipeline {
 
                     // Health check
                     def healthCheck = bat(
-                        script: "curl -s http://localhost:${newEnv == 'blue' ? '8090' : '8091'}",
+                        script: "curl -s http://localhost:${hostPort}",
                         returnStatus: true
                     )
 

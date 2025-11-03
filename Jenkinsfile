@@ -10,7 +10,7 @@ pipeline {
     }
 
     stages {
-        stage('Checkout') {
+        stage('Checkout SCM') {
             steps {
                 echo 'Cloning repository...'
                 git branch: 'main', url: 'https://github.com/MUTHU-SANJAI/myapp-bluegreen.git'
@@ -40,14 +40,14 @@ pipeline {
             steps {
                 script {
                     echo 'Determining active container...'
-                    def activeContainer = bat(returnStdout: true, script: "docker ps --filter name=%BLUE_CONTAINER% --format {{.Names}}").trim()
-                    def inactiveContainer = activeContainer == env.BLUE_CONTAINER ? env.GREEN_CONTAINER : env.BLUE_CONTAINER
-                    def inactivePort = inactiveContainer == env.BLUE_CONTAINER ? env.BLUE_PORT : env.GREEN_PORT
+                    def activeContainer = bat(returnStdout: true, script: "docker ps --filter \"name=%BLUE_CONTAINER%\" --format \"{{.Names}}\"").trim()
+                    def inactiveContainer = activeContainer == BLUE_CONTAINER ? GREEN_CONTAINER : BLUE_CONTAINER
+                    def inactivePort = inactiveContainer == BLUE_CONTAINER ? BLUE_PORT : GREEN_PORT
 
                     echo "Active container: ${activeContainer ?: 'None'}"
-                    echo "Deploying to inactive container: ${inactiveContainer}"
+                    echo "Deploying new version to inactive container: ${inactiveContainer}"
 
-                    // Stop old inactive container
+                    // Remove old inactive container if exists
                     bat """
                         for /F "tokens=*" %%i in ('docker ps -aq -f "name=${inactiveContainer}"') do (
                             docker stop %%i
@@ -57,14 +57,14 @@ pipeline {
                     """
 
                     // Run new inactive container
-                    bat "docker run -d --name ${inactiveContainer} -p ${inactivePort}:3000 %IMAGE_NAME%:latest"
+                    bat "docker run -d --name ${inactiveContainer} -p ${inactivePort}:3000 -e ENVIRONMENT=${inactiveContainer} %IMAGE_NAME%:latest"
 
                     // Health check
                     echo "Waiting 5 seconds for container to start..."
                     bat "timeout /t 5"
                     bat "curl http://localhost:${inactivePort}"
 
-                    echo "Blue-Green deployment step completed!"
+                    echo "Blue-Green switch complete!"
                 }
             }
         }
@@ -73,6 +73,7 @@ pipeline {
             steps {
                 echo 'Checking if containers are healthy...'
                 bat """
+                    timeout /t 5
                     curl http://localhost:%BLUE_PORT%
                     curl http://localhost:%GREEN_PORT%
                 """
@@ -82,7 +83,7 @@ pipeline {
 
     post {
         success {
-            echo 'Pipeline and deployment completed successfully!'
+            echo 'Pipeline completed successfully!'
         }
         failure {
             echo 'Pipeline failed. Check logs for details.'

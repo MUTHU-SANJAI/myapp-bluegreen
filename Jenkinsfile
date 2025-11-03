@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         IMAGE_NAME = 'muthusanjai/myapp-bluegreen'
-        IMAGE_TAG  = 'latest'  // Update tag if needed
+        IMAGE_TAG  = 'latest'
     }
 
     stages {
@@ -26,7 +26,7 @@ pipeline {
         stage('Blue-Green Deployment') {
             steps {
                 script {
-                    // --- Stop & remove Blue container if exists ---
+                    // --- Stop & remove Blue container if it exists ---
                     def blueExists = bat(script: 'docker ps -aq -f "name=myapp-blue"', returnStdout: true).trim()
                     if (blueExists) {
                         echo "Stopping and removing old Blue container..."
@@ -36,7 +36,7 @@ pipeline {
                         echo "No Blue container to remove."
                     }
 
-                    // --- Stop & remove Green container if exists ---
+                    // --- Stop & remove Green container if it exists ---
                     def greenExists = bat(script: 'docker ps -aq -f "name=myapp-green"', returnStdout: true).trim()
                     if (greenExists) {
                         echo "Stopping and removing old Green container..."
@@ -46,7 +46,7 @@ pipeline {
                         echo "No Green container to remove."
                     }
 
-                    // --- Determine which environment is inactive ---
+                    // --- Determine inactive environment ---
                     def activeEnv = bat(script: 'docker ps -q -f "name=myapp-blue"', returnStdout: true).trim() ? "green" : "blue"
                     def port = activeEnv == "blue" ? 8090 : 8091
                     echo "Deploying new version to ${activeEnv} environment on port ${port}..."
@@ -54,7 +54,7 @@ pipeline {
                     // --- Run new container ---
                     bat "docker run -d --name myapp-${activeEnv} -p ${port}:8080 -e ENVIRONMENT=${activeEnv} %IMAGE_NAME%:%IMAGE_TAG%"
 
-                    // --- Wait for the container to start ---
+                    // --- Wait for container to start ---
                     sleep(time:5, unit:"SECONDS")
 
                     // --- Health check ---
@@ -73,7 +73,7 @@ pipeline {
 
     post {
         failure {
-            echo "Deployment failed. Check Jenkins logs for details."
+            echo "Deployment failed. Check logs for details."
         }
         success {
             echo "Blue-Green deployment completed successfully!"

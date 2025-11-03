@@ -99,38 +99,35 @@ pipeline {
         stage('Health Check') {
             steps {
                 script {
-                    def port = PORT_BLUE
-                    def inactiveContainer = 'myapp-blue'
+                    def port = '8082'
+                    def containerName = 'myapp-green'
 
-                    def activeContainer = bat(
-                        script: 'docker ps --filter "name=myapp-" --format "{{.Names}}"',
-                        returnStdout: true
-                    ).trim()
+                    echo "Checking ${containerName} on port ${port}..."
 
-                    if (activeContainer.contains('myapp-blue')) {
-                        inactiveContainer = 'myapp-green'
-                        port = PORT_GREEN
-                    }
+                    def maxRetries = 5
+                    def success = false
 
-                    echo "Waiting for ${inactiveContainer} to start on port ${port}..."
-
-                    // Health check loop using Windows-friendly curl
-                    for (int i = 0; i < 5; i++) {
-                        echo "Checking if container is responding..."
-                        def result = bat(
-                            script: "curl -s -o NUL -w \"%{http_code}\" \"http://localhost:${port}\"",
+                    for (int i = 1; i <= maxRetries; i++) {
+                        echo "Attempt ${i}..."
+                        def status = bat(
+                            script: 'curl -s -o NUL -w "%{http_code}" http://localhost:' + port,
                             returnStdout: true
                         ).trim()
 
-                        if (result == '200') {
-                            echo "${inactiveContainer} is running successfully!"
+                        echo "HTTP status: ${status}"
+
+                        if (status == '200') {
+                            echo "${containerName} is healthy!"
+                            success = true
                             break
-                        } else if (i == 4) {
-                            error "Health check failed for ${inactiveContainer}"
                         } else {
-                            echo "Not ready yet, retrying in 5 seconds..."
+                            echo "Not ready yet, retrying in 5s..."
                             sleep 5
                         }
+                    }
+
+                    if (!success) {
+                        error "${containerName} failed health check!"
                     }
                 }
             }

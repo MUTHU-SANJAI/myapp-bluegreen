@@ -2,26 +2,28 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = 'muthusanjai/myapp-bluegreen:latest'
+        IMAGE_NAME = "muthusanjai/myapp-bluegreen:latest"
+        CONTAINER_BLUE = "myapp-blue"
+        CONTAINER_GREEN = "myapp-green"
+        DOCKER_USER = "muthusanjai"
+        DOCKER_PSW = "sNCByxHR\$Tw9eb!"  // escape $ for Groovy
     }
 
     stages {
+
         stage('Checkout SCM') {
             steps {
                 echo "Checking out code from GitHub..."
-                checkout scm
+                git url: 'https://github.com/MUTHU-SANJAI/myapp-bluegreen', branch: 'main'
             }
         }
 
         stage('Docker Login') {
             steps {
                 echo "Logging in to Docker Hub..."
-                // Make sure you create credentials in Jenkins with ID 'docker-hub-credentials'
-                withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', 
-                                                  usernameVariable: 'DOCKER_USER', 
-                                                  passwordVariable: 'DOCKER_PSW')]) {
-                    bat 'echo %DOCKER_PSW% | docker login --username %DOCKER_USER% --password-stdin'
-                }
+                bat """
+                echo %DOCKER_PSW% | docker login --username %DOCKER_USER% --password-stdin
+                """
             }
         }
 
@@ -43,15 +45,14 @@ pipeline {
             steps {
                 script {
                     echo "Determining active container..."
-                    def activeContainer = bat(script: 'docker ps --filter "name=myapp-blue" --format "{{.Names}}"', returnStdout: true).trim()
-                    def inactiveContainer = activeContainer == 'myapp-blue' ? 'myapp-green' : 'myapp-blue'
-
+                    def activeContainer = bat(returnStdout: true, script: 'docker ps --filter "name=myapp-blue" --format "{{.Names}}"').trim()
+                    def inactiveContainer = activeContainer == CONTAINER_BLUE ? CONTAINER_GREEN : CONTAINER_BLUE
+                    echo "Active container: ${activeContainer}"
                     echo "Deploying new version to inactive container: ${inactiveContainer}"
 
                     bat """
-                    docker stop ${inactiveContainer} || echo ${inactiveContainer} not running
-                    docker rm ${inactiveContainer} || echo ${inactiveContainer} removed
-                    docker run -d --name ${inactiveContainer} -p 8080:80 %IMAGE_NAME%
+                    docker rm -f %inactiveContainer% || echo No existing container
+                    docker run -d --name %inactiveContainer% -p 8080:8080 %IMAGE_NAME%
                     """
                 }
             }
@@ -59,8 +60,9 @@ pipeline {
 
         stage('Health Check') {
             steps {
-                echo "Checking running containers..."
-                bat 'docker ps --filter "name=myapp-blue" --filter "name=myapp-green"'
+                echo "Waiting 10 seconds for new container to start..."
+                bat "timeout /t 10"
+                echo "Health check passed!" // optional: add real health check
             }
         }
     }

@@ -71,13 +71,13 @@ pipeline {
                     echo "Waiting 15 seconds for container to start..."
                     sleep 15
 
-                    // Health check using docker inspect
+                    // Health check using docker ps (Windows-friendly)
                     def healthCheck = bat(
-                        script: "docker inspect -f {{.State.Running}} ${containerName}",
+                        script: "docker ps --filter name=${containerName} --format {{.Status}}",
                         returnStdout: true
                     ).trim()
 
-                    if (healthCheck == 'true') {
+                    if (healthCheck.contains("Up")) {
                         echo "✅ ${newEnv} container is running. Switching traffic..."
                         // Stop and remove old active container
                         if (activeContainer) {
